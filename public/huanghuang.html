@@ -95,6 +95,10 @@ main{flex:1;display:block;padding:12px;overflow:hidden}
 /* 自摸胡弹框：与碰/杠同位置同样式，「胡」按钮红色高亮 */
 .claimbox.winbox{border-color:#e0a8a8}
 .claimbox .cb.win{background:linear-gradient(180deg,#fdeaea,#f9d2d2);border-color:#c0392b;color:#a53434;font-weight:800}
+/* 可开杠弹框：与胡/过同款弹框，但按钮更大、整体上浮 —— 盖住自家牌池下沿一小块，不压手牌 */
+.claimbox.kongbox{top:-72px;right:14px;padding:8px 10px;border-color:#c9b47a;box-shadow:0 6px 20px rgba(31,42,36,.24)}
+.claimbox.kongbox .cb{font-size:16px;padding:9px 18px;border-radius:10px}
+.claimbox.kongbox .cb.passk{border-color:#cfd9d1;background:linear-gradient(180deg,#fff,#f3f6f4);color:#5b6570;font-weight:600}
 .claimbox .chint b.good{color:#186b43}
 .claimbox .chint b.bad{color:#a53434}
 .claimbox .chint .dim{color:#8a939d}
@@ -139,7 +143,7 @@ main{flex:1;display:block;padding:12px;overflow:hidden}
 .pzone .t.last{outline-offset:0}
 .pzone .zempty{font-size:10.5px;color:#a9b4ad}
 .zmid{position:absolute;left:225px;top:225px;width:200px;height:200px;
-  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;
   border-radius:10px;background:rgba(255,255,255,.35)}
 .zlai{display:flex;align-items:center;gap:3px}
 
@@ -237,12 +241,13 @@ table.cand th{color:var(--ink3);font-weight:600;font-size:11.5px;text-align:righ
 table.cand td:first-child,table.cand th:first-child{text-align:left}
 table.cand tr.top td{background:#fffaf0}
 table.cand tr.mine td{background:#eaf4ee}
+.infoi{display:inline-block;width:14px;height:14px;line-height:13px;text-align:center;border:1px solid #9db4c4;border-radius:50%;font-size:10px;font-style:normal;font-weight:700;color:#4a7ba6;background:#eef4f8;cursor:pointer;margin-left:3px;vertical-align:1px;user-select:none}
+.infoi:hover{background:#dbe8f2;border-color:#6f97b8}
 .grid27{display:grid;grid-template-columns:repeat(9,1fr);gap:3px}
 .g27{padding:3px 0;text-align:center;border:1px solid var(--line);border-radius:5px;font-size:11px;background:#fbfaf7}
 .g27 .c{font-size:12px;font-weight:700}
 .g27.zero{opacity:.35}
 .g27.lz{background:#fdf3dc;border-color:var(--gold)}
-.g27.hot{background:#eaf4ee;border-color:#b6ddc6}
 .suitrow{display:flex;align-items:center;gap:4px;margin-bottom:4px}
 .suitrow .lb{width:16px;font-size:12px;color:var(--ink3)}
 
@@ -1269,6 +1274,7 @@ var TILE_FACE_DATA = ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAHgAAACcCAM
       pending: null, over: false, hint: null, review: null, history: [], result: null, winInfo: null,
       pick: null, pickSlot: null,                       // pickSlot = 我点的那张牌在槽位里的序号
       claimSel: null,                                   // 碰/杠/过：我选的那一项（再点一次才确认）
+      wallHeadN: 0, wallTailN: 0,                       // 两层牌墙：普通摸从墙头(shift)拿几张、杠/打赖子从墙尾(pop)拿几张
       rs: { first: 0, firstHit: 0, shSum: 0, shN: 0 }   // 本局统计（用于成长曲线）
     };
     for (var n = 0; n < 13; n++) for (var p = 0; p < 4; p++) ps[p].hand.push(wall.pop());
@@ -1341,7 +1347,7 @@ var TILE_FACE_DATA = ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAHgAAACcCAM
     }
     return {
       laiziType: lt, unseen: unseen, unseenLaizi: unseenLaizi, totalUnseen: totalUnseen,
-      opponents: opponents, noDiscardLaizi: !S.laiziDiscard, wallSize: G.wall.length,
+      opponents: opponents, noDiscardLaizi: !S.laiziDiscard, wallSize: wallLeft(),
       meldsArr: me.melds, opts: winOpts(seat)
     };
   }
@@ -1359,7 +1365,7 @@ var TILE_FACE_DATA = ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAHgAAACcCAM
   }
   /* 统一的胡牌判定 opts：附带「至少2元」规则的 noSoft 限制（没出过赖子时只能硬胡） */
   function winOpts(seat) {
-    var o = { lastTile: (G.wall.length === 0) };
+    var o = { lastTile: (wallLeft() === 0) };
     if (!softOK(seat)) o.noSoft = true;
     return o;
   }
@@ -1410,10 +1416,30 @@ var TILE_FACE_DATA = ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAHgAAACcCAM
 
   function renderCenter() {
     var lt = G.laiziType;
-    /* 中心区只留「牌墙剩」数字和赖子牌（局数在页眉 hdChip 已有，去掉文字标签更清爽） */
+    /* 中心区：两层牌墙（平视图「吕」字墩）+ 赖子牌（不显示数字文本）。
+     * 每墩 = 上下两个小方块叠成「吕」字：上块 = 上层 wall[2i]、下块 = 下层 wall[2i+1]，颜色统一深绿。
+     * 空位 = 极淡轮廓（保持墩位可辨）。
+     * 渲染顺序颠倒：左上角 = 末墩（墙尾，-2/-1 所在），右下角 = 首墩（墙头）。
+     * 正常摸从右下角往左上推进；杠、打赖子从左上角按 -2,-1,-4,-3 顺序往右下消耗。
+     * 27 墩折两行（14+13）左对齐 */
+    var headN = G.wallHeadN || 0, tailN = G.wallTailN || 0, left = 54 - headN - tailN;
+    function tk(p) { return (p < headN) || wallTailTaken(p, tailN); }
+    var dices = '';
+    for (var d = 26; d >= 0; d--) {                    // 颠倒：左上角 = 墙尾末墩
+      var upOn = !tk(2 * d), dnOn = !tk(2 * d + 1);    // 上层/下层是否还在
+      function cell(on) {
+        return '<i style="width:10px;height:8px;border-radius:1.5px;box-sizing:border-box;background:' +
+          (on ? 'linear-gradient(160deg,#3f9c6b,#1e7a4e)' : 'rgba(23,65,95,.06)') + ';border:1px solid ' +
+          (on ? 'rgba(15,70,42,.45)' : 'rgba(23,65,95,.08)') + '"></i>';
+      }
+      dices += '<span style="display:flex;flex-direction:column;gap:1px;width:10px;height:17px;flex:none">' + cell(upOn) + cell(dnOn) + '</span>';
+    }
+    var rounds = Math.floor(left / 4);
+    var tip = '牌墙还剩 ' + left + ' 张 ≈ 还能摸 ' + rounds + (left % 4 ? ' 轮半' : ' 轮') +
+      '。每个方块 = 一墩（上下两张叠成吕字）：方块在 = 还没摸走，透明 = 已摸走。' +
+      '左上角 = 墙尾（杠、打赖子按 -2,-1,-4,-3 顺序从这拿）；右下角 = 墙头（正常摸先上层后下层）';
     var h = '<div class="zmid">' +
-      '<div style="font-size:11px;color:#5b6570">牌墙剩</div>' +
-      '<div style="font-size:21px;font-weight:800;color:#17415f;line-height:1.1">' + G.wall.length + '</div>' +
+      '<div title="' + tip + '" style="display:flex;flex-wrap:wrap;gap:5px 1.5px;width:162px;align-content:flex-start">' + dices + '</div>' +
       '<div class="zlai">' + tileHTML(lt, 'md', lt) + '</div></div>';
     for (var seat = 0; seat < 4; seat++) h += zoneHTML(seat);
     $('pool').innerHTML = h;
@@ -1477,6 +1503,22 @@ var TILE_FACE_DATA = ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAHgAAACcCAM
       return '<div class="claimbox winbox"><div class="cbtns">' + wbtns + '</div>' +
         (selW ? '<div class="chint">再点一次「' + (selW === 'win' ? '胡' : '过') + '」确认</div>' : '') + '</div>';
     }
+    if (!G.pending && G.turn === 0 && G.phase === 'discard' && G.canKongList && G.canKongList.length && !G.kongPass) {
+      // 可开杠（自己回合）：与胡/过同款弹框，按钮更大、上浮盖住自家牌池一小块
+      // 点一次选中（高亮）、再点同一颗确认执行；「不杠」收起弹框，本回合不再提示
+      var ks = G.kongSel, kbtns = '';
+      for (var ki = 0; ki < G.canKongList.length; ki++) {
+        var ko = G.canKongList[ki], isSel = (ks === ko.tile + ':' + ko.kind);
+        kbtns += '<button class="cb' + (isSel ? ' sel' : '') + '" onclick="UI.kongPick(' + ko.tile + ',\'' + ko.kind + '\')">' +
+          MJ.kongName(ko.kind) + ' ' + tn(ko.tile) +
+          (S.kongPay ? '<span style="font-size:11px;color:#8a5f14;margin-left:4px">+' + (S.base * MJ.kongMultiplier(ko.kind) * 3) + '</span>' : '') +
+          '</button>';
+      }
+      kbtns += '<button class="cb passk" onclick="UI.passKong()">不杠</button>';
+      return '<div class="claimbox kongbox"><div class="cbtns">' + kbtns + '</div>' +
+        (ks ? '<div class="chint">再点一次「' + MJ.kongName(ks.split(':')[1]) + '」确认</div>'
+            : '<div class="chint">杠独立收钱、杠后还补一张；不想杠点「不杠」</div>') + '</div>';
+    }
     if (!G.pending || G.pending.type !== 'claim') return '';
     var pd = G.pending, A = (S.coach !== 'off') ? claimAdvice() : null;
     var sel = G.claimSel;
@@ -1510,6 +1552,12 @@ var TILE_FACE_DATA = ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAHgAAACcCAM
     var picked = (G.phase === 'confirm') ? G.pick : -1;
     // 我实际点的那张牌所在槽位（同型牌有多张时，徽标要落在我点的那一张上）
     var pickSlot = (G.phase === 'confirm' && G.pickSlot != null) ? G.pickSlot : -1;
+    // 碰/杠决策中：把参与决策的牌在手牌里标出来（描边 + 可碰/可杠 徽标）
+    var claimTags = {};                                // 牌型 → '碰' | '杠'
+    if (G.pending && G.pending.type === 'claim')
+      claimTags[G.pending.tile] = G.pending.canKong ? '杠' : '碰';
+    if (!G.pending && G.phase === 'discard' && G.turn === 0 && G.canKongList && G.canKongList.length && !G.kongPass)
+      for (var ctI = 0; ctI < G.canKongList.length; ctI++) claimTags[G.canKongList[ctI].tile] = '杠';
 
     // 我的碰/杠副露：摆在自己手牌右侧，与手牌一起水平居中（myhand 内 justify-content:center）
     var myMelds = '';
@@ -1531,10 +1579,13 @@ var TILE_FACE_DATA = ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAHgAAACcCAM
     // 我选中的那张优先（哪怕它不是第一张）；推荐牌则标在该牌型的第一张上
     function slot(t, isDrawn, mark, si) {
       var rec = !!recSet[t], pk = (t === picked);
+      var ct2 = claimTags[t] || '';                // 这张牌是否参与碰/杠决策
       var act = (G.phase === 'confirm');    // 确认阶段：牌上方徽标就是「出牌」按钮
       var badge;
       if (!mark) {
-        badge = '<div class="sp"></div>';
+        badge = (ct2 && claimAt[t] === si)
+          ? '<div class="rec" style="background:#fdf1e7;border-color:#e0955c;color:#a34410;font-weight:700">可' + ct2 + '</div>'
+          : '<div class="sp"></div>';
       } else if (act && pk && rec) {
         // 我选的正是教练最优之一 → 绿色，一眼看出「选对了」
         badge = '<div class="rec act" data-t="' + t + '" title="打出这张牌（教练最优之一）" ' +
@@ -1551,11 +1602,19 @@ var TILE_FACE_DATA = ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAHgAAACcCAM
       } else if (rec) {
         badge = '<div class="rec" style="background:#fff9ec;border-color:#e8c875;color:#8a5f14">★ 推荐</div>';
       } else badge = '<div class="sp"></div>';
-      var markBox = mark ? (
-        (pk ? '<div style="position:absolute;inset:-3px;border:2px solid #1f5fa8;border-radius:7px;pointer-events:none"></div>' : '') +
-        (pk && rec ? '<div style="position:absolute;inset:-5px;border:2px solid #1c7a45;border-radius:9px;pointer-events:none"></div>' : '') +
-        (rec && !pk ? '<div style="position:absolute;inset:-3px;border:2px solid #c99214;border-radius:7px;pointer-events:none"></div>' : '')
-      ) : '';
+      // 兜底：碰/杠决策的牌若徽标位空闲（mark=true 但没有选中/推荐徽标），也显示「可碰/可杠」
+      if (badge === '<div class="sp"></div>' && ct2 && claimAt[t] === si)
+        badge = '<div class="rec" style="background:#fdf1e7;border-color:#e0955c;color:#a34410;font-weight:700">可' + ct2 + '</div>';
+      var markBox =
+        (ct2 ? '<div style="position:absolute;inset:-3px;border:2px solid #d06a1f;border-radius:7px;pointer-events:none"></div>' : '') +
+        (ct2 && mark && claimAt[t] === si
+          ? '<div style="position:absolute;top:-8px;right:-5px;background:#d06a1f;color:#fff;font-size:10px;line-height:1;padding:2px 4px;border-radius:4px;font-weight:700;pointer-events:none">' + ct2 + '</div>'
+          : '') +
+        (mark ? (
+          (pk ? '<div style="position:absolute;inset:-3px;border:2px solid #1f5fa8;border-radius:7px;pointer-events:none"></div>' : '') +
+          (pk && rec ? '<div style="position:absolute;inset:-5px;border:2px solid #1c7a45;border-radius:9px;pointer-events:none"></div>' : '') +
+          (rec && !pk ? '<div style="position:absolute;inset:-3px;border:2px solid #c99214;border-radius:7px;pointer-events:none"></div>' : '')
+        ) : '');
       if (isDrawn) {
         // 摸到的牌始终落在「待摸框」里：空框（等摸）→ 填进框内（摸到），位置不跳动
         return '<div class="slot drawn">' + badge +
@@ -1574,6 +1633,10 @@ var TILE_FACE_DATA = ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAHgAAACcCAM
     for (var k = 0; k < seq.length; k++) if (markAt[seq[k].t] === undefined) markAt[seq[k].t] = k;
     // 我点的那一张（不是第一张也照样标它）；推荐牌型 == 我选的牌型时，同样跟着我这张
     if (pickSlot >= 0 && pickSlot < seq.length && seq[pickSlot].t === picked) markAt[picked] = pickSlot;
+    // 碰/杠牌型 → 首个匹配槽位：「可碰/可杠」徽标只标在该牌型的第一张上，其余同型牌只画描边
+    var claimAt = {};
+    for (var c3 = 0; c3 < seq.length; c3++)
+      if (claimTags[seq[c3].t] !== undefined && claimAt[seq[c3].t] === undefined) claimAt[seq[c3].t] = c3;
     // 手牌区槽位先画（seq 里摸牌占最后一个序号，data-si/pickSlot 序号保持不变）
     for (var k2 = 0; k2 < body.length; k2++) h += slot(seq[k2].t, false, markAt[seq[k2].t] === k2, k2);
     // 摸牌空位：只有「等着摸牌」（13 张有效）时才预留；
@@ -1689,13 +1752,12 @@ var TILE_FACE_DATA = ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAHgAAACcCAM
         h2 += '<span class="msg">这手<b style="color:#a53434">能自摸胡</b> —— 点右上角 <b>胡 / 过</b> 做选择（先自己判断）</span>';
       } else {
         var kongs = myKongOptions(me);
-        for (var i = 0; i < kongs.length; i++) {
-          h2 += '<button class="big" onclick="UI.doKong(' + kongs[i].tile + ',\'' + kongs[i].kind + '\')">' +
-            MJ.kongName(kongs[i].kind) + ' ' + tn(kongs[i].tile) +
-            (S.kongPay ? '<span style="font-size:11px;color:#8a5f14"> +' + (S.base * MJ.kongMultiplier(kongs[i].kind) * 3) + '</span>' : '') +
-            '</button>';
+        if (kongs.length && !G.kongPass) {
+          // 杠改为弹框提示（手牌右上方，与胡/过同款）：操作条只放文字引导
+          h2 += '<span class="msg">你有可开的<b>杠</b> —— 点手牌右上方弹出框选 <b>杠 / 不杠</b></span>';
+        } else {
+          h2 += '<span class="msg">请点击手牌出牌</span>';
         }
-        h2 += '<span class="msg">请点击手牌出牌</span>';
       }
       el.innerHTML = '<div class="row">' + h2 + '</div>' + handChipsRow(); return;
     }
@@ -1735,8 +1797,8 @@ var TILE_FACE_DATA = ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAHgAAACcCAM
     var afterBest = afterList[0];
 
     var U = ctx.totalUnseen;
-    var pA = estWinProb(nowBest.shanten, nowBest.outs, U, G.wall.length);
-    var pB = estWinProb(afterBest.shanten, afterBest.outs, U, G.wall.length);
+    var pA = estWinProb(nowBest.shanten, nowBest.outs, U, wallLeft());
+    var pB = estWinProb(afterBest.shanten, afterBest.outs, U, wallLeft());
     var advice;
     if (isKong) {
       // 杠独立收钱 + 杠后补一张：只要不明显变慢就杠
@@ -1855,7 +1917,7 @@ var TILE_FACE_DATA = ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAHgAAACcCAM
     h += '<div class="sub-h">出牌前问自己三个问题</div>';
     if (G.canWin) h += '<div class="hint" style="margin-top:0;background:#f0f8f3;border-left-color:#1e7a4e">你这手<b>可以胡</b> —— 右上角弹框选「胡 / 过」，先自己判断，再点一次确认。</div>';
     var _kl = (G.canKongList && G.canKongList.length) ? G.canKongList : null;
-    if (_kl) h += '<div class="hint" style="margin-top:0">你还有可开的<b>杠</b>（' + _kl.map(function (o) { return tn(o.tile); }).join('、') + '）—— 先想清楚杠不杠：杠独立收钱、杠后还补一张，一般值得，但别拖慢自己的向听。</div>';
+    if (_kl) h += '<div class="hint" style="margin-top:0">你还有可开的<b>杠</b>（' + _kl.map(function (o) { return tn(o.tile); }).join('、') + '）—— 手牌右上方弹出框选「杠 / 不杠」。先自己判断：杠独立收钱、杠后还补一张，一般值得，但别拖慢自己的向听。</div>';
     var lz = MJ.laiziStatus(G.players[0].hand, G.players[0].melds, G.laiziType);
     if (lz.over) {
       h += '<div class="hint" style="background:#fff6f6;border-left-color:#c0392b;margin-top:0">' +
@@ -2015,7 +2077,7 @@ var TILE_FACE_DATA = ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAHgAAACcCAM
       if (sc.shanten === b.shanten && Math.abs(d) > 0.4) {
         r.push('对比：第二选择是打 <b>' + tn(sc.discard) + '</b>（进张约 ' + sc.outs.toFixed(1) + ' 张）。' +
           '打 <b>' + tn(b.discard) + '</b> 多 <b>' + d.toFixed(1) + '</b> 张进张，' +
-          '按剩余牌数估算，胡牌机会约高 <b>' + Math.min(60, Math.round(d / Math.max(1, G.wall.length) * 100 * 2.2)) + '%</b>。');
+          '按剩余牌数估算，胡牌机会约高 <b>' + Math.min(60, Math.round(d / Math.max(1, wallLeft()) * 100 * 2.2)) + '%</b>。');
       } else if (sc.shanten !== b.shanten) {
         r.push('对比：打 <b>' + tn(sc.discard) + '</b> 会掉到 ' + sc.shanten + ' 向听（慢一步），所以不推荐。');
       }
@@ -2048,7 +2110,12 @@ var TILE_FACE_DATA = ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAHgAAACcCAM
   function candTableHTML(H, picked) {
     var lt = G.laiziType, bs = {};
     if (H.bestSet) for (var z = 0; z < H.bestSet.length; z++) bs[H.bestSet[z]] = 1;
-    var h = '<div class="sub-h">出哪张更好（按评分排序）' + ((H.bestSet && H.bestSet.length > 1) ? '　<span class="badge g">并列最优 ' + H.bestSet.length + ' 张</span>' : '') + '</div><table class="cand"><tr><th>打</th><th>向听</th><th>进张(牌墙)</th><th>进张(未见)</th><th>剩赖子</th><th>评分</th></tr>';
+    var h = '<div class="sub-h">出哪张更好（按评分排序）' + ((H.bestSet && H.bestSet.length > 1) ? '　<span class="badge g">并列最优 ' + H.bestSet.length + ' 张</span>' : '') + '</div><table class="cand">' +
+      '<tr><th>打</th><th>向听</th>' +
+      '<th title="能让向听数−1 的牌型，按「未见张数」扣除推测在他家手里的部分后求和。点 ⓘ 看完整规则。">进张(牌墙)<span class="infoi" onclick="UI.showOutsRule(\'wall\')">i</span></th>' +
+      '<th title="能让向听数−1 的牌型的「未见张数」直接求和，是上限值。点 ⓘ 看完整规则。">进张(未见)<span class="infoi" onclick="UI.showOutsRule(\'raw\')">i</span></th>' +
+      '<th>剩赖子</th>' +
+      '<th title="评分 = −向听 × 1000 + 进张(牌墙) × 硬胡系数(1~1.12) × 10 − 赖子超限罚 420 + 听牌且能硬胡奖 6 − 被碰风险 × 4。硬胡系数：手里没赖子=1.12、剩1张=1.048、其余=1。分数越高越推荐，并列最高的都算推荐。">评分</th></tr>';
     for (var i = 0; i < H.list.length; i++) {
       var c = H.list[i];
       var lzBad = c.laiziOver ? ' style="color:#a53434"' : '';
@@ -2066,20 +2133,16 @@ var TILE_FACE_DATA = ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAHgAAACcCAM
   }
 
   function remainGridHTML() {
-    var H = G.hint, lt = G.laiziType;
-    var hot = {};
-    // 还没揭晓时不要标出你的有效进张，否则等于泄题
-    if (H && H.best && showAnswer()) for (var i = 0; i < H.best.detail.length; i++) hot[H.best.detail[i].tile] = 1;
-    var ctx = H ? H.ctx : buildCtx(0);
+    var lt = G.laiziType;
+    var ctx = G.hint ? G.hint.ctx : buildCtx(0);
     /* 真麻将 + 蒙层：赖子金蒙层(自带「赖」角标)；普通牌灰蒙层，剩得越少蒙层越厚；
-     * 右下角数字=未见张数；绿框=你的有效进张 */
+     * 右下角数字=未见张数 */
     function tile(t, u) {
       var isLz = (t === lt), veil = '';
       if (isLz) veil = '<div style="position:absolute;inset:0;background:rgba(232,181,58,.34);border-radius:5px;pointer-events:none"></div>';
       else if (u < 4) { var a = ((4 - u) / 4 * 0.62).toFixed(2); veil = '<div style="position:absolute;inset:0;background:rgba(88,97,105,' + a + ');border-radius:5px;pointer-events:none"></div>'; }
       var num = '<div style="position:absolute;right:-1px;bottom:-1px;background:rgba(33,39,43,.85);color:#fff;font-size:9px;line-height:1;padding:1px 3px;border-radius:5px 0 5px 0;font-weight:700;pointer-events:none">' + u + '</div>';
-      var frame = hot[t] ? 'outline:2px solid #1e7a4e;outline-offset:-1px;' : '';
-      return '<div title="' + tileTitle(t, lt) + ' · 剩 ' + u + ' 张" style="position:relative;flex:none;border-radius:5px;' + frame + '">' +
+      return '<div title="' + tileTitle(t, lt) + ' · 剩 ' + u + ' 张" style="position:relative;flex:none;border-radius:5px;">' +
         tileHTML(t, 'sm', lt) + veil + num + '</div>';
     }
     var h = '<div class="sub-h" style="margin-top:14px">牌池剩余（牌面下数字 = 未见张数；蒙层越厚剩得越少）</div>';
@@ -2093,7 +2156,7 @@ var TILE_FACE_DATA = ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAHgAAACcCAM
       h += '</div></div>';
     }
     h += '<div style="font-size:11.5px;color:#8a939d;margin-top:6px">' +
-      '<span class="badge g">绿框</span> = 你的有效进张　<span class="badge y">金蒙层+赖</span> = 赖子　蒙层越灰 = 剩得越少（0=绝张）</div>';
+      '<span class="badge y">金蒙层+赖</span> = 赖子　蒙层越灰 = 剩得越少（0=绝张）</div>';
     return h;
   }
 
@@ -2124,6 +2187,31 @@ var TILE_FACE_DATA = ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAHgAAACcCAM
   }
   function showAnswer() { return !!(G.hint && (G.revealed || G.phase === 'confirm')); }
 
+  /* ---------------- 两层牌墙（墩模型） ----------------
+   * wall 数组保持 54 张不删元素；每 2 张为一墩：wall[2i] = 上层（第二层）、wall[2i+1] = 下层（第一层）。
+   * 正常摸（墙头）：按数组顺序 wall[0],wall[1],wall[2]…（墩0上→墩0下→墩1上→…）。
+   * 杠/打赖子补摸（墙尾）：按 -2,-1,-4,-3 索引 → wall[52],wall[53],wall[50],wall[51]…（末墩上→末墩下→前墩上→…）。
+   * wallHeadN = 头侧已摸张数；wallTailN = 尾侧已摸张数 */
+  function wallTailTaken(p, tailN) {           // 位置 p 是否已被尾侧摸走
+    var r = 53 - p, g = Math.floor(r / 2), half = Math.floor(tailN / 2);
+    return g < half || (g === half && tailN % 2 === 1 && r % 2 === 1);
+  }
+  function wallLeft() { return 54 - (G.wallHeadN || 0) - (G.wallTailN || 0); }
+  function wallDrawHead() {                    // 正常摸：从墙头拿一张（跳过尾侧已取的位），墙空返回 null
+    var p = G.wallHeadN || 0, tn = G.wallTailN || 0;
+    while (p <= 53 && wallTailTaken(p, tn)) p++;
+    if (p > 53) return null;
+    G.wallHeadN = p + 1;
+    return G.wall[p];
+  }
+  function wallDrawTail() {                    // 杠/打赖子补摸：按 -2,-1,-4,-3 顺序拿，墙空返回 null
+    var k = G.wallTailN || 0;
+    var idx = 54 - 2 * (Math.floor(k / 2) + 1) + (k % 2);   // k=0→52, 1→53, 2→50, 3→51, 4→48…
+    if (idx < (G.wallHeadN || 0)) return wallDrawHead();    // 尾墩已被头侧吃掉：退化为拿剩余最后一张
+    G.wallTailN = k + 1;
+    return G.wall[idx];
+  }
+
   /* ---------------- 流程 ---------------- */
   function startDraw(seat, fromKong) {
     if (G.over) return;
@@ -2133,8 +2221,8 @@ var TILE_FACE_DATA = ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAHgAAACcCAM
     G.winDismissed = false;   // 新摸一手，重置「本手已点过」标记
     G.pending = null;
     var p = G.players[seat];
-    if (G.wall.length === 0) { doDrawGame_(); return; }
-    var t = G.wall.pop();
+    var t = wallDrawHead();                                // 正常摸牌从墙头拿（每墩先上层后下层）
+    if (t == null) { doDrawGame_(); return; }
     p.hand.push(t); p.drawn = t;
     SFX.draw();
     if (seat === 0) SFX.say('摸' + zhName(t));   // 自己摸的牌读作「摸X万」，练听牌感
@@ -2165,6 +2253,7 @@ var TILE_FACE_DATA = ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAHgAAACcCAM
       G.canWin = isWin;
       if (isWin) { G.pending = { type: 'win' }; G.claimSel = null; }   // 能胡：弹框 胡/过（与碰/杠同款）
       G.canKongList = (S.kong ? kongOptions(p) : []);
+      G.kongSel = null; G.kongPass = null;    // 杠弹框状态随新回合重置
       G.decisionNote = null;
       computeHint();
       render();
@@ -2319,6 +2408,34 @@ var TILE_FACE_DATA = ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAHgAAACcCAM
         return;
       }
     }
+    // 撑赖子：打出的赖子 → 自己从墙尾补摸一张继续打（-2,-1,-4,-3 顺序），不出轮
+    if (t === G.laiziType && wallLeft() > 0) {
+      var lt3 = wallDrawTail();
+      if (lt3 == null) { doDrawGame_(); return; }
+      p.hand.push(lt3); p.drawn = lt3;
+      SFX.draw(); SFX.say('打赖子，补一张');
+      G.status = p.name + ' 打赖子，墙尾补摸…';
+      var lw = MJ.checkWin(p.hand, p.melds, G.laiziType, winOpts(seat));
+      if (lw.win) {   // 补的牌能胡：与杠后补牌同款，按普通自摸处理
+        G.winInfo = lw;
+        if (seat === 0) { G.turn = 0; G.phase = 'discard'; G.canWin = true; G.pending = { type: 'win' }; G.claimSel = null; computeHint(); render(); return; }
+        render(); setTimeout(function () { aiWin(seat, false); }, S.delay); return;
+      }
+      var kopts = (S.kong ? kongOptions(p) : []);   // 补的牌也可能凑成杠
+      if (seat === 0) {
+        G.turn = 0; G.phase = 'discard'; G.canWin = false;
+        G.canKongList = kopts; G.kongSel = null; G.kongPass = null;
+        G.decisionNote = '打出赖子后从<b>墙尾</b>补摸了 1 张，继续出牌。';
+        computeHint(); render();
+      } else {
+        render();
+        var bko = null;
+        for (var oi2 = 0; oi2 < kopts.length; oi2++) if (aiWantKong(p, kopts[oi2])) { bko = kopts[oi2]; break; }
+        if (bko) setTimeout(function () { aiDoKong(seat, bko); }, S.delay);
+        else setTimeout(function () { aiDiscard(seat); }, S.delay);
+      }
+      return;
+    }
     setTimeout(function () { startDraw((seat + 1) % 4, false); }, gap());
   }
 
@@ -2342,8 +2459,9 @@ var TILE_FACE_DATA = ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAHgAAACcCAM
     render();
     if (kind === 'kong') {
       // 杠后从牌尾补一张
-      if (G.wall.length === 0) { doDrawGame_(); return; }
-      var t = G.wall.pop(); p.hand.push(t); p.drawn = t;
+      var t = wallDrawTail();
+      if (t == null) { doDrawGame_(); return; }
+      p.hand.push(t); p.drawn = t;
       var kw = MJ.checkWin(p.hand, p.melds, G.laiziType, winOpts(seat));
       if (kw.win) {
         if (seat === 0) { G.turn = 0; G.phase = 'discard'; G.canWin = true; G.winInfo = kw; G.pending = { type: 'win' }; G.claimSel = null; computeHint(); render(); return; }
@@ -2355,6 +2473,7 @@ var TILE_FACE_DATA = ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAHgAAACcCAM
       var cw = MJ.checkWin(p.hand, p.melds, G.laiziType, winOpts(seat));
       G.canWin = cw.win; G.winInfo = cw;
       G.canKongList = kongOptions(p);   // 杠后刷新可杠列表，避免自动托管重复杠
+      G.kongSel = null; G.kongPass = null;
       computeHint();
       render();
     } else setTimeout(function () { aiDiscard(seat); }, S.delay);
@@ -2409,7 +2528,7 @@ var TILE_FACE_DATA = ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAHgAAACcCAM
     }
     kongPay(seat, opt.kind, opt.tile, seat);
     render();
-    if (G.wall.length === 0) { doDrawGame_(); return; }
+    if (wallLeft() === 0) { doDrawGame_(); return; }
     setTimeout(function () { startDraw(seat, true); }, S.delay);
   }
 
@@ -2431,7 +2550,7 @@ var TILE_FACE_DATA = ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAHgAAACcCAM
     SFX.win();
     SFX.say(seat === 0 ? '胡了' : G.players[seat].name + '胡了');
     var p = G.players[seat];
-    var last = (G.wall.length === 0);
+    var last = (wallLeft() === 0);
     var win = MJ.checkWin(p.hand, p.melds, G.laiziType, winOpts(seat));
     // 撑赖子（只影响胡的费用，不影响杠）：付家应付 = 基数 × 2^n，
     // n = 胡牌那家撑的次数 + 付钱那家撑的次数
@@ -2660,6 +2779,19 @@ var TILE_FACE_DATA = ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAHgAAACcCAM
       G.revealed = true; G.phase = 'discard'; G.pick = null; G.pickSlot = null;
       render();
     },
+    /** 可开杠弹框：第一次点是「选择」（再点同一颗才执行），与胡/过两段式一致 */
+    kongPick: function (tile, kind) {
+      if (G.over || G.turn !== 0 || G.phase !== 'discard' || G.pending) return;
+      var key = tile + ':' + kind;
+      if (G.kongSel === key) { G.kongSel = null; UI.doKong(tile, kind); return; }
+      G.kongSel = key; render();
+    },
+    /** 「不杠」：收起杠弹框，本回合不再提示（正常出牌） */
+    passKong: function () {
+      if (G.over || G.turn !== 0 || G.phase !== 'discard') return;
+      G.kongSel = null; G.kongPass = true;
+      render();
+    },
     doKong: function (tile, kind) {
       var me = G.players[0], i;
       // 先选后看：点了杠才揭晓这手值不值（不提前在按钮上给答案）
@@ -2677,8 +2809,9 @@ var TILE_FACE_DATA = ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAHgAAACcCAM
         for (i = 0; i < me.melds.length; i++) if (me.melds[i].type === 'pung' && me.melds[i].tile === tile) { me.melds[i].type = 'kong'; break; }
       }
       kongPay(0, kind, tile, 0);
-      if (G.wall.length === 0) { doDrawGame_(); return; }
-      var t = G.wall.pop(); me.hand.push(t); me.drawn = t;
+      var t = wallDrawTail();   // 杠补牌从墙尾拿（-2,-1,-4,-3 顺序）
+      if (t == null) { doDrawGame_(); return; }
+      me.hand.push(t); me.drawn = t;
       G.turn = 0; G.phase = 'discard';
       // 本玩法没有杠上开花：杠后补的牌胡了就是普通自摸
       var cw = MJ.checkWin(me.hand, me.melds, G.laiziType, winOpts(0));
@@ -2686,6 +2819,7 @@ var TILE_FACE_DATA = ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAHgAAACcCAM
       if (cw.win) { G.pending = { type: 'win' }; G.claimSel = null; }   // 补牌能胡：弹框 胡/过
       // 杠后手牌/副露已变，必须重新计算可杠列表，否则 autoTick 会对着已杠掉的牌反复杠（把牌墙摸空）
       G.canKongList = kongOptions(me);
+      G.kongSel = null; G.kongPass = null;
       computeHint();
       render();
       // 先选后看：杠后补的牌能胡也不主动提示（没有杠上开花，补牌自摸就是普通自摸）
@@ -2704,8 +2838,33 @@ var TILE_FACE_DATA = ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAHgAAACcCAM
     },
     showRules: function () { rulesModal(); },
     showTut: function () { tutModal(); },
-    showStat: function () { statModal(); }
+    showStat: function () { statModal(); },
+    showOutsRule: function (kind) { outsRuleModal(kind); }
   };
+
+  /** 「进张」列头 ⓘ 弹窗：kind='wall' 进张(牌墙) / 'raw' 进张(未见) */
+  function outsRuleModal(kind) {
+    var unseen = '4 − 你手牌/副露 − 四家弃牌 − 他家副露 − 已翻出的赖子皮';
+    var h;
+    if (kind === 'raw') {
+      h = '<div class="kv">' +
+        '<div class="k">范围</div><div>只统计能让<b>向听数 −1</b> 的牌型（有效进张）</div>' +
+        '<div class="k">每种的张数</div><div>「未见张数」= ' + unseen + '</div>' +
+        '<div class="k">结果</div><div>把每种牌型的未见张数<b>直接求和</b></div>' +
+        '<div class="k">含义</div><div>不扣除可能还在他家手里的牌，是<b>上限值</b></div>' +
+        '</div>' +
+        '<div class="hint" style="margin-top:8px">「进张(牌墙)」在此基础上扣除推测已被他家拿走的部分，更接近真实能摸到的张数。</div>';
+    } else {
+      h = '<div class="kv">' +
+        '<div class="k">第 1 步</div><div>对每一种能让<b>向听数 −1</b> 的牌型，先算它的「未见张数」：<br><b>' + unseen + '</b></div>' +
+        '<div class="k">第 2 步</div><div>按比例扣除推测<b>已被他家拿走</b>的部分：<br>某家分摊 = 该牌未见张 ×（他家手牌数 ÷ 总未见张）× <b>行为系数</b></div>' +
+        '<div class="k">行为系数</div><div>他连打同一门 → 该门 ×0.35~0.75<br>他家副露过该门 → ×1.2<br>同一张他打过 → ×0.7<br><span class="dim">系数限幅 0.2~1.6</span></div>' +
+        '<div class="k">结果</div><div>各家分摊全部求和</div>' +
+        '<div class="k">含义</div><div>比「进张(未见)」更接近<b>真实能摸到的张数</b></div>' +
+        '</div>';
+    }
+    UI.openModal(kind === 'raw' ? '「进张(未见)」怎么算' : '「进张(牌墙)」怎么算', h, []);
+  }
 
   function rulesModal() {
     var h = '<div class="sub-h" style="margin-top:0">本局采用的规则（公安晃晃 · 常用版）</div>' +
@@ -2723,7 +2882,7 @@ var TILE_FACE_DATA = ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAHgAAACcCAM
       '<b>明杠</b>：别家打出的牌，你手上有 3 张 → <b>打出者一人付 ' + (S.base * 3) + '</b><br>' +
       '<b>暗杠</b>：自己摸到 4 张 → 每家付 ' + (S.base * 1) + '<br>' +
       '<b>补杠</b>：碰过之后又摸到第 4 张 → 每家付 ' + (S.base * 1) + '<br>' +
-      '<span class="dim">本玩法<b>没有赖子皮杠</b>，也<b>没有杠上开花</b>（杠后补的牌胡了就是普通自摸）</span>' +
+      '<span class="dim"><b>牌墙两层成墩</b>：正常摸每墩先摸上层、再摸下层；<b>杠、打赖子从墙尾补摸一张</b>（按 -2,-1,-4,-3 顺序，即末墩上层→末墩下层→前一墩…）；本玩法<b>没有赖子皮杠</b>，也<b>没有杠上开花</b>（杠后补的牌胡了就是普通自摸）</span>' +
       '</div>' +
       '<div class="k">胡牌计分</div><div>' +
       '<b>软胡</b>（赖子当任意牌）基数 1 · <b>硬胡</b>（没用赖子 / 赖子当本身）基数 2<br>' +
@@ -3116,7 +3275,8 @@ var TILE_FACE_DATA = ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAHgAAACcCAM
     get G() { return G; }, S: S,
     humanDiscard: humanDiscard, newGame: newGame, computeHint: computeHint,
     chartSVG: chartSVG, metricSeries: metricSeries, METRICS: METRICS, loadStat: loadStat,
-    sameScore: sameScore, faceSVG: faceSVG
+    sameScore: sameScore, faceSVG: faceSVG,
+    wallDrawHead: wallDrawHead, wallDrawTail: wallDrawTail, wallTailTaken: wallTailTaken, wallLeft: wallLeft
   };
 
   $('btnNew').onclick = function () { UI.newGame(); };
